@@ -56,6 +56,24 @@ export interface MatchReason {
   negatives: string[];
 }
 
+export interface DimensionDelta {
+  key: string;
+  label: string;
+  before: number;
+  after: number;
+  change: number;
+  weight: number;
+  weightedChange: number;
+}
+
+export interface ScoreChange {
+  previousOverall: number;
+  currentOverall: number;
+  delta: number;
+  timestamp: Date;
+  dimensionDeltas: DimensionDelta[];
+}
+
 export interface Match {
   id: number;
   houseId: number;
@@ -77,6 +95,7 @@ export interface Match {
     cleaningLabel: string;
     socialLabel: string;
   };
+  scoreChange?: ScoreChange | null;
 }
 
 export interface Message {

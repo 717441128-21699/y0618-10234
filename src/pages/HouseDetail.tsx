@@ -3,23 +3,28 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   MapPin, Home, Users, CheckCircle, XCircle, ArrowLeft, 
   MessageSquare, FileText, Shield, ChevronLeft, ChevronRight,
-  BedDouble, Bath, Maximize, Sun, Building, RefreshCw, Sparkles, BarChart3
+  BedDouble, Bath, Maximize, Sun, Building, RefreshCw, Sparkles, BarChart3,
+  TrendingUp as TrendingUpIcon, TrendingDown as TrendingDownIcon
 } from 'lucide-react';
 import MatchScore from '../components/MatchScore.js';
 import { houseApi, matchApi, chatApi } from '../api/client.js';
 import type { House, Match } from '../../shared/types.js';
 import { useAuthStore } from '../store/useAuthStore.js';
+import { useMatchStore } from '../store/useMatchStore.js';
 import { formatTime, formatSmoking, formatGenderPreference, formatDate } from '../utils/match.js';
 
 export default function HouseDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, fetchProfile } = useAuthStore();
+  const { matches, updateMatch } = useMatchStore();
   const [house, setHouse] = useState<House | null>(null);
   const [match, setMatch] = useState<Match | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentPhoto, setCurrentPhoto] = useState(0);
   const [calculating, setCalculating] = useState(false);
+
+  const houseIdInt = id ? parseInt(id) : NaN;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -32,8 +37,14 @@ export default function HouseDetail() {
 
         if (user?.realNameVerified) {
           try {
+            const existing = matches.find(m => m.houseId === parseInt(id));
+            if (existing && existing.reasons && existing.reasons.length > 0) {
+              setMatch(existing);
+            }
+            await fetchProfile();
             const matchData = await matchApi.calculate(parseInt(id));
             setMatch(matchData);
+            updateMatch(matchData, true);
           } catch (e) {
             console.log('Match calculation not available');
           }
@@ -46,7 +57,7 @@ export default function HouseDetail() {
     };
 
     fetchData();
-  }, [id, user]);
+  }, [id, user, houseIdInt]);
 
   const handleChat = async () => {
     if (!user?.realNameVerified) {
@@ -76,8 +87,10 @@ export default function HouseDetail() {
     if (!id || !user?.realNameVerified) return;
     setCalculating(true);
     try {
+      await fetchProfile();
       const freshMatch = await matchApi.calculate(parseInt(id));
       setMatch(freshMatch);
+      updateMatch(freshMatch, true);
     } catch (error) {
       console.error('Recalculate failed:', error);
     } finally {
@@ -254,17 +267,34 @@ export default function HouseDetail() {
 
           {user?.realNameVerified && (
             <div className="bg-gradient-to-br from-indigo-50 via-white to-orange-50 rounded-2xl p-6 shadow-sm border border-indigo-100">
-              <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
                 <div className="flex items-center space-x-3">
                   <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center shadow-md shadow-indigo-200">
                     <BarChart3 className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-gray-800 flex items-center space-x-2">
-                      <span>智能匹配度分析</span>
-                      <Sparkles className="w-4 h-4 text-amber-400" />
-                    </h2>
-                    <p className="text-xs text-gray-500 mt-0.5">6 个维度加权算法 · 实时计算</p>
+                    <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                      <h2 className="text-xl font-bold text-gray-800 flex items-center space-x-2">
+                        <span>智能匹配度分析</span>
+                        <Sparkles className="w-4 h-4 text-amber-400" />
+                      </h2>
+                      {match?.scoreChange && match.scoreChange.delta !== 0 && (
+                        <span className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                          match.scoreChange.delta > 0
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}>
+                          {match.scoreChange.delta > 0 
+                            ? <TrendingUpIcon className="w-3 h-3" /> 
+                            : <TrendingDownIcon className="w-3 h-3" />}
+                          <span>本次{match.scoreChange.delta > 0 ? '上升' : '下降'} {Math.abs(match.scoreChange.delta)} 分</span>
+                          <span className="opacity-60 font-normal">
+                            （{match.scoreChange.previousOverall}→{match.scoreChange.currentOverall}）
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">6 个维度加权算法 · 与推荐列表同步</p>
                   </div>
                 </div>
                 <button
@@ -276,6 +306,28 @@ export default function HouseDetail() {
                   <span className="text-sm font-medium">{calculating ? '重新计算中…' : '重新计算'}</span>
                 </button>
               </div>
+
+              {match?.scoreChange && match.scoreChange.delta !== 0 && (
+                <div className={`mb-4 p-3 rounded-xl border text-sm ${
+                  match.scoreChange.delta > 0
+                    ? 'bg-emerald-50 border-emerald-100 text-gray-700'
+                    : 'bg-rose-50 border-rose-100 text-gray-700'
+                }`}>
+                  <div className="font-semibold mb-1">
+                    {match.scoreChange.delta > 0 ? '📈 这次比上次计算更匹配了！' : '📉 这次比上次计算有所下降'}
+                  </div>
+                  <div className="text-xs opacity-90">
+                    主要变化维度：
+                    {[...match.scoreChange.dimensionDeltas]
+                      .filter(d => Math.abs(d.weightedChange) >= 0.3)
+                      .sort((a, b) => Math.abs(b.weightedChange) - Math.abs(a.weightedChange))
+                      .slice(0, 3)
+                      .map(d => `${d.label}（${d.before}→${d.after}，加权${d.weightedChange >= 0 ? '+' : ''}${d.weightedChange}分）`)
+                      .join('；') || '各维度变化不大'}
+                  </div>
+                </div>
+              )}
+
               {match ? (
                 <MatchScore match={match} />
               ) : (
