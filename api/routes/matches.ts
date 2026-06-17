@@ -77,10 +77,12 @@ router.get('/', authMiddleware, requireVerified, async (req: AuthRequest, res: R
     }
     
     const houses = await query('SELECT * FROM houses WHERE landlord_id != ?', [req.user.id]);
+    const calcResults: Map<number, ReturnType<typeof calculateMatchScore>> = new Map();
     
     for (const house of houses) {
       const h = parseHouse(house);
       const scores = calculateMatchScore(req.user, h);
+      calcResults.set(h.id, scores);
       
       await run(
         `INSERT OR REPLACE INTO matches (house_id, seeker_id, overall_score, sleep_score, 
@@ -93,7 +95,7 @@ router.get('/', authMiddleware, requireVerified, async (req: AuthRequest, res: R
     
     const matches = await query(
       `SELECT m.*, h.*, u.nickname as landlord_nickname, u.avatar as landlord_avatar,
-              u.real_name_verified as landlord_verified
+              u.real_name_verified as landlord_verified, u.gender as landlord_gender
        FROM matches m
        LEFT JOIN houses h ON m.house_id = h.id
        LEFT JOIN users u ON h.landlord_id = u.id
@@ -105,14 +107,16 @@ router.get('/', authMiddleware, requireVerified, async (req: AuthRequest, res: R
     
     const result: Match[] = matches.map(m => {
       const match = parseMatch(m);
+      const h = parseHouse(m);
       match.house = {
-        ...parseHouse(m),
+        ...h,
         landlord: {
           id: m.landlord_id,
           phone: '',
           nickname: m.landlord_nickname,
           avatar: m.landlord_avatar,
           realNameVerified: !!m.landlord_verified,
+          gender: m.landlord_gender,
           hasPet: false,
           smoking: 'never' as const,
           createdAt: new Date()
@@ -120,6 +124,9 @@ router.get('/', authMiddleware, requireVerified, async (req: AuthRequest, res: R
         matchScore: match.overallScore
       };
       match.seeker = req.user;
+      const calc = calcResults.get(h.id) || calculateMatchScore(req.user, h);
+      match.reasons = calc.reasons;
+      match.habitBreakdown = calc.habitBreakdown;
       return match;
     });
     
@@ -153,10 +160,12 @@ router.get('/house/:houseId', authMiddleware, requireVerified, async (req: AuthR
     const seekers = await query('SELECT * FROM users WHERE id != ? AND real_name_verified = 1', [req.user.id]);
     const houseData = await queryOne('SELECT * FROM houses WHERE id = ?', [houseId]);
     const h = parseHouse(houseData!);
+    const calcBySeeker: Map<number, ReturnType<typeof calculateMatchScore>> = new Map();
     
     for (const seeker of seekers) {
       const s = parseUser(seeker);
       const scores = calculateMatchScore(s, h);
+      calcBySeeker.set(s.id, scores);
       
       await run(
         `INSERT OR REPLACE INTO matches (house_id, seeker_id, overall_score, sleep_score, 
@@ -179,7 +188,11 @@ router.get('/house/:houseId', authMiddleware, requireVerified, async (req: AuthR
     
     const result: Match[] = matches.map(m => {
       const match = parseMatch(m);
-      match.seeker = parseUser(m);
+      const s = parseUser(m);
+      match.seeker = s;
+      const calc = calcBySeeker.get(s.id) || calculateMatchScore(s, h);
+      match.reasons = calc.reasons;
+      match.habitBreakdown = calc.habitBreakdown;
       return match;
     });
     
@@ -215,8 +228,8 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response<Match 
     }
     
     const match = parseMatch(matchData);
-    match.house = parseHouse(matchData);
-    match.seeker = {
+    const h = parseHouse(matchData);
+    const seeker = {
       id: matchData.seeker_id,
       phone: '',
       nickname: matchData.seeker_nickname,
@@ -231,7 +244,13 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response<Match 
       socialPreference: matchData.seeker_social_preference,
       gender: matchData.seeker_gender,
       createdAt: new Date()
-    };
+    } as User;
+    match.house = h;
+    match.seeker = seeker;
+    
+    const calc = calculateMatchScore(seeker, h);
+    match.reasons = calc.reasons;
+    match.habitBreakdown = calc.habitBreakdown;
     
     res.json(match);
   } catch (err) {
@@ -309,6 +328,8 @@ router.get('/calculate/:houseId', authMiddleware, requireVerified, async (req: A
       matchScore: scores.overallScore
     };
     match.seeker = req.user;
+    match.reasons = scores.reasons;
+    match.habitBreakdown = scores.habitBreakdown;
     
     res.json(match);
   } catch (err) {

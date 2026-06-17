@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   MapPin, Home, Users, CheckCircle, XCircle, ArrowLeft, 
   MessageSquare, FileText, Shield, ChevronLeft, ChevronRight,
-  BedDouble, Bath, Maximize, Sun, Building
+  BedDouble, Bath, Maximize, Sun, Building, RefreshCw, Sparkles, BarChart3
 } from 'lucide-react';
 import MatchScore from '../components/MatchScore.js';
 import { houseApi, matchApi, chatApi } from '../api/client.js';
@@ -70,6 +70,19 @@ export default function HouseDetail() {
   const handleCreateAgreement = () => {
     if (!house) return;
     navigate(`/agreements/create?houseId=${house.id}&partyBId=${house.landlordId}`);
+  };
+
+  const handleRecalculate = async () => {
+    if (!id || !user?.realNameVerified) return;
+    setCalculating(true);
+    try {
+      const freshMatch = await matchApi.calculate(parseInt(id));
+      setMatch(freshMatch);
+    } catch (error) {
+      console.error('Recalculate failed:', error);
+    } finally {
+      setCalculating(false);
+    }
   };
 
   if (loading) {
@@ -239,10 +252,50 @@ export default function HouseDetail() {
             </div>
           </div>
 
-          {match && user?.realNameVerified && (
-            <div>
-              <h2 className="text-xl font-bold text-gray-800 mb-4">匹配度分析</h2>
-              <MatchScore match={match} />
+          {user?.realNameVerified && (
+            <div className="bg-gradient-to-br from-indigo-50 via-white to-orange-50 rounded-2xl p-6 shadow-sm border border-indigo-100">
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center space-x-3">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center shadow-md shadow-indigo-200">
+                    <BarChart3 className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center space-x-2">
+                      <span>智能匹配度分析</span>
+                      <Sparkles className="w-4 h-4 text-amber-400" />
+                    </h2>
+                    <p className="text-xs text-gray-500 mt-0.5">6 个维度加权算法 · 实时计算</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleRecalculate}
+                  disabled={calculating}
+                  className="group inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-white border border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 text-indigo-600 hover:text-indigo-700 transition-all shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-4 h-4 ${calculating ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                  <span className="text-sm font-medium">{calculating ? '重新计算中…' : '重新计算'}</span>
+                </button>
+              </div>
+              {match ? (
+                <MatchScore match={match} />
+              ) : (
+                <div className="text-center py-10 bg-white/60 rounded-xl border border-dashed border-indigo-200">
+                  <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-indigo-100 flex items-center justify-center">
+                    <RefreshCw className={`w-7 h-7 text-indigo-500 ${calculating ? 'animate-spin' : ''}`} />
+                  </div>
+                  <p className="text-gray-500 mb-3">
+                    {calculating ? '正在根据您的档案计算匹配度…' : '点击右上角按钮计算匹配度'}
+                  </p>
+                  {!calculating && (
+                    <button
+                      onClick={handleRecalculate}
+                      className="px-5 py-2 bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-600 transition-colors"
+                    >
+                      立即计算
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

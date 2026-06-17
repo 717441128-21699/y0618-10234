@@ -45,6 +45,17 @@ export interface House {
   matchScore?: number;
 }
 
+export interface MatchReason {
+  key: string;
+  label: string;
+  icon: string;
+  score: number;
+  weight: number;
+  weightedScore: number;
+  positives: string[];
+  negatives: string[];
+}
+
 export interface Match {
   id: number;
   houseId: number;
@@ -59,6 +70,13 @@ export interface Match {
   createdAt: Date;
   house?: House;
   seeker?: User;
+  reasons?: MatchReason[];
+  habitBreakdown?: {
+    cleaningScore: number;
+    socialScore: number;
+    cleaningLabel: string;
+    socialLabel: string;
+  };
 }
 
 export interface Message {
