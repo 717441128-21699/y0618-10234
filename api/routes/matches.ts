@@ -114,11 +114,12 @@ router.get('/', authMiddleware, requireVerified, async (req: AuthRequest, res: R
           avatar: m.landlord_avatar,
           realNameVerified: !!m.landlord_verified,
           hasPet: false,
-          smoking: 'never',
+          smoking: 'never' as const,
           createdAt: new Date()
         },
         matchScore: match.overallScore
       };
+      match.seeker = req.user;
       return match;
     });
     
@@ -239,7 +240,7 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response<Match 
   }
 });
 
-router.get('/calculate/:houseId', authMiddleware, async (req: AuthRequest, res: Response<Match | { error: string }>) => {
+router.get('/calculate/:houseId', authMiddleware, requireVerified, async (req: AuthRequest, res: Response<Match | { error: string }>) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: '未登录' });
@@ -247,7 +248,12 @@ router.get('/calculate/:houseId', authMiddleware, async (req: AuthRequest, res: 
     }
     
     const houseId = parseInt(req.params.houseId);
-    const houseData = await queryOne('SELECT * FROM houses WHERE id = ?', [houseId]);
+    const houseData = await queryOne(
+      `SELECT h.*, u.nickname as landlord_nickname, u.avatar as landlord_avatar, 
+              u.real_name_verified as landlord_verified
+       FROM houses h LEFT JOIN users u ON h.landlord_id = u.id WHERE h.id = ?`,
+      [houseId]
+    );
     
     if (!houseData) {
       res.status(404).json({ error: '房源不存在' });
@@ -257,22 +263,54 @@ router.get('/calculate/:houseId', authMiddleware, async (req: AuthRequest, res: 
     const house = parseHouse(houseData);
     const scores = calculateMatchScore(req.user, house);
     
-    await run(
-      `INSERT OR REPLACE INTO matches (house_id, seeker_id, overall_score, sleep_score, 
-       pet_score, smoking_score, gender_score, habit_score, location_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [houseId, req.user.id, scores.overallScore, scores.sleepScore, scores.petScore,
-       scores.smokingScore, scores.genderScore, scores.habitScore, scores.locationScore]
+    const existing = await queryOne<any>(
+      'SELECT id FROM matches WHERE house_id = ? AND seeker_id = ?',
+      [houseId, req.user.id]
     );
     
-    res.json({
-      id: 0,
-      houseId,
-      seekerId: req.user.id,
-      ...scores,
-      createdAt: new Date(),
-      ...getMatchLevel(scores.overallScore)
-    } as any);
+    if (existing) {
+      await run(
+        `UPDATE matches SET overall_score = ?, sleep_score = ?, pet_score = ?, 
+         smoking_score = ?, gender_score = ?, habit_score = ?, location_score = ?,
+         created_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [scores.overallScore, scores.sleepScore, scores.petScore,
+         scores.smokingScore, scores.genderScore, scores.habitScore, scores.locationScore,
+         existing.id]
+      );
+    } else {
+      await run(
+        `INSERT INTO matches (house_id, seeker_id, overall_score, sleep_score, 
+         pet_score, smoking_score, gender_score, habit_score, location_score)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [houseId, req.user.id, scores.overallScore, scores.sleepScore, scores.petScore,
+         scores.smokingScore, scores.genderScore, scores.habitScore, scores.locationScore]
+      );
+    }
+    
+    const finalMatch = await queryOne<any>(
+      `SELECT m.* FROM matches m WHERE m.house_id = ? AND m.seeker_id = ?`,
+      [houseId, req.user.id]
+    );
+    
+    const match = parseMatch(finalMatch!);
+    match.house = {
+      ...house,
+      landlord: {
+        id: houseData.landlord_id,
+        phone: '',
+        nickname: houseData.landlord_nickname,
+        avatar: houseData.landlord_avatar,
+        realNameVerified: !!houseData.landlord_verified,
+        hasPet: false,
+        smoking: 'never' as const,
+        createdAt: new Date()
+      },
+      matchScore: scores.overallScore
+    };
+    match.seeker = req.user;
+    
+    res.json(match);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '服务器错误' });

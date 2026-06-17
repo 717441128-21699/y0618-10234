@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Users, TrendingUp, AlertCircle, ArrowRight, 
-  RefreshCw, Filter, Sparkles
+  RefreshCw, Filter, Sparkles, RotateCcw, Check
 } from 'lucide-react';
 import { matchApi, authApi } from '../api/client.js';
 import type { Match, User } from '../../shared/types.js';
 import { useAuthStore } from '../store/useAuthStore.js';
-import { getMatchLevel, getScoreColor, formatGender, formatTime } from '../utils/match.js';
+import { getMatchLevel, getScoreColor, formatGender, formatTime, formatSmoking } from '../utils/match.js';
 
 export default function MatchList() {
   const navigate = useNavigate();
@@ -16,6 +16,8 @@ export default function MatchList() {
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<'score' | 'time'>('score');
   const [minScore, setMinScore] = useState(0);
+  const [recalculatingId, setRecalculatingId] = useState<number | null>(null);
+  const [justRecalculatedId, setJustRecalculatedId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user?.realNameVerified) {
@@ -35,6 +37,25 @@ export default function MatchList() {
       console.error('Failed to fetch matches:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const recalculateSingle = async (houseId: number) => {
+    setRecalculatingId(houseId);
+    try {
+      const newMatch = await matchApi.calculate(houseId);
+      setMatches(prev => prev.map(m => 
+        m.houseId === houseId 
+          ? { ...newMatch, id: newMatch.id || m.id }
+          : m
+      ));
+      setJustRecalculatedId(houseId);
+      setTimeout(() => setJustRecalculatedId(null), 2000);
+    } catch (error) {
+      console.error('Failed to recalculate match:', error);
+      alert('重新计算匹配度失败，请刷新页面重试');
+    } finally {
+      setRecalculatingId(null);
     }
   };
 
@@ -157,48 +178,78 @@ export default function MatchList() {
         <div className="space-y-4">
           {filteredMatches.map((match) => {
             const matchInfo = getMatchLevel(match.overallScore);
-            const seeker = match.seeker;
             const house = match.house;
+            const landlord = house?.landlord;
+            const isRecalculating = recalculatingId === house?.id;
+            const justRecalculated = justRecalculatedId === house?.id;
             
-            if (!seeker || !house) return null;
+            if (!house) return null;
 
             return (
               <div
                 key={match.id}
-                className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
+                className={`bg-white rounded-2xl p-6 shadow-sm border hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 ${
+                  justRecalculated ? 'border-green-400 ring-2 ring-green-200' : 'border-gray-100'
+                }`}
               >
                 <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
                   <div className="flex items-center space-x-4 flex-shrink-0">
-                    <div className="relative">
+                    <div className="relative w-20 h-20 rounded-2xl overflow-hidden border-2 border-orange-200">
                       <img
-                        src={seeker.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=default'}
-                        alt={seeker.nickname}
-                        className="w-16 h-16 rounded-2xl border-2 border-orange-200"
+                        src={house.photos?.[0] || 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=200&h=200&fit=crop'}
+                        alt={house.title}
+                        className="w-full h-full object-cover"
                       />
-                      {seeker.realNameVerified && (
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center border-2 border-white">
-                          <Users className="w-3 h-3 text-white" />
-                        </div>
-                      )}
                     </div>
                     <div>
-                      <h3 className="font-semibold text-gray-800">{seeker.nickname}</h3>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="font-semibold text-gray-800">{landlord?.nickname || '房东'}</h3>
+                        {landlord?.realNameVerified && (
+                          <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                            <Users className="w-2.5 h-2.5 text-white" />
+                          </div>
+                        )}
+                      </div>
                       <div className="text-sm text-gray-500 mt-1 space-y-0.5">
-                        <div>{formatGender(seeker.gender)} · {formatTime(seeker.sleepTime)}-{formatTime(seeker.wakeTime)}</div>
-                        <div>{seeker.hasPet ? '有宠物' : '无宠物'} · {seeker.smoking === 'never' ? '不吸烟' : '吸烟'}</div>
+                        <div className="flex items-center flex-wrap gap-x-2">
+                          <span>{formatGender(landlord?.gender)}</span>
+                          <span>·</span>
+                          <span>{formatTime(user?.sleepTime)}-{formatTime(user?.wakeTime)}</span>
+                        </div>
+                        <div className="flex items-center flex-wrap gap-x-2">
+                          <span>{user?.hasPet ? '有宠物' : '无宠物'}</span>
+                          <span>·</span>
+                          <span>{formatSmoking(user?.smoking || 'never')}</span>
+                        </div>
+                        <div className="text-orange-500 mt-1 font-medium">
+                          ¥{house.rent}/月 · {house.area}㎡
+                        </div>
                       </div>
                     </div>
                   </div>
 
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-3">
-                      <Link
-                        to={`/houses/${house.id}`}
-                        className="text-orange-500 hover:text-orange-600 font-medium hover:underline"
-                      >
-                        {house.title}
-                      </Link>
+                      <div className="flex items-center space-x-2 flex-wrap gap-1">
+                        <Link
+                          to={`/houses/${house.id}`}
+                          className="text-orange-500 hover:text-orange-600 font-medium hover:underline"
+                        >
+                          {house.title}
+                        </Link>
+                        {house.isRecruitment && (
+                          <span className="px-2 py-0.5 bg-purple-100 text-purple-600 rounded-full text-xs font-medium">
+                            补位招募
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center space-x-2">
+                        {justRecalculated && (
+                          <span className="flex items-center text-green-500 text-sm font-medium animate-pulse">
+                            <Check className="w-4 h-4 mr-1" />
+                            已更新
+                          </span>
+                        )}
                         <div
                           className={`px-3 py-1 rounded-full text-xs font-medium text-white`}
                           style={{ backgroundColor: matchInfo.color }}
@@ -228,16 +279,37 @@ export default function MatchList() {
                         </div>
                       ))}
                     </div>
+                    
+                    {justRecalculated && (
+                      <div className="mt-3 text-xs text-gray-500 bg-green-50 rounded-lg p-2 border border-green-100">
+                        💡 匹配度已根据您最新的生活习惯档案（清洁频率：{user?.cleaningFrequency || '未设置'}、社交偏好：{user?.socialPreference || '未设置'}）重新计算
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex flex-col md:flex-row gap-3 flex-shrink-0">
-                    <Link
-                      to={`/chat/${seeker.id}`}
-                      className="px-5 py-2.5 bg-gradient-to-r from-orange-400 to-orange-500 text-white font-medium rounded-xl hover:shadow-lg hover:shadow-orange-200 transition-all flex items-center justify-center space-x-2"
+                  <div className="flex flex-col md:flex-row gap-2 flex-shrink-0 w-full md:w-auto">
+                    <button
+                      onClick={() => recalculateSingle(house.id)}
+                      disabled={isRecalculating}
+                      className="px-4 py-2 bg-teal-50 text-teal-600 font-medium rounded-xl hover:bg-teal-100 transition-all flex items-center justify-center space-x-1 disabled:opacity-60 disabled:cursor-not-allowed border border-teal-200"
+                      title="根据最新个人档案重新计算匹配度"
                     >
-                      <Users className="w-4 h-4" />
-                      <span>发起聊天</span>
-                    </Link>
+                      {isRecalculating ? (
+                        <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-4 h-4" />
+                      )}
+                      <span className="text-sm">{isRecalculating ? '计算中' : '重新计算'}</span>
+                    </button>
+                    {landlord && (
+                      <Link
+                        to={`/chat/${landlord.id}`}
+                        className="px-5 py-2.5 bg-gradient-to-r from-orange-400 to-orange-500 text-white font-medium rounded-xl hover:shadow-lg hover:shadow-orange-200 transition-all flex items-center justify-center space-x-2"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>联系房东</span>
+                      </Link>
+                    )}
                     <Link
                       to={`/houses/${house.id}`}
                       className="px-5 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-all flex items-center justify-center space-x-2"

@@ -44,34 +44,60 @@ function calculateGenderScore(seeker: User, house: House): number {
 }
 
 function calculateHabitScore(seeker: User, house: House): number {
-  let score = 70;
+  let score = 65;
   
-  const cleaningMap: Record<string, number> = {
-    '每天': 5,
-    '每两天': 4,
-    '每周': 3,
-    '每两周': 2,
-    '每月': 1
+  const cleaningScoreMap: Record<string, number> = {
+    '每天': 35,
+    '每周2-3次': 28,
+    '每周1次': 18,
+    '每月1次': 5
   };
-  
-  if (seeker.cleaningFrequency && (cleaningMap[seeker.cleaningFrequency] >= 3)) {
-    score += 15;
-  } else if (seeker.cleaningFrequency) {
-    score -= 10;
+
+  let cleaningPoints = 10;
+  if (seeker.cleaningFrequency) {
+    cleaningPoints = cleaningScoreMap[seeker.cleaningFrequency];
+    if (cleaningPoints === undefined) {
+      if (seeker.cleaningFrequency.includes('天') && !seeker.cleaningFrequency.includes('每')) {
+        cleaningPoints = 35;
+      } else if (seeker.cleaningFrequency.includes('2') || seeker.cleaningFrequency.includes('3')) {
+        cleaningPoints = 28;
+      } else if (seeker.cleaningFrequency.includes('每两') || (seeker.cleaningFrequency.includes('周') && seeker.cleaningFrequency.includes('1'))) {
+        cleaningPoints = 18;
+      } else if (seeker.cleaningFrequency.includes('月')) {
+        cleaningPoints = 5;
+      } else {
+        cleaningPoints = 15;
+      }
+    }
   }
+  score += cleaningPoints;
   
-  const socialMap: Record<string, number> = {
-    '喜欢社交': 10,
-    '偶尔社交': 15,
-    '喜欢独处': 5,
-    '看情况': 10
+  const socialScoreMap: Record<string, number> = {
+    '喜欢社交': 22,
+    '适度社交': 25,
+    '喜欢独处': 18,
+    '偶尔社交': 22,
+    '看情况': 20
   };
-  
+
+  let socialPoints = 10;
   if (seeker.socialPreference) {
-    score += socialMap[seeker.socialPreference] || 0;
+    socialPoints = socialScoreMap[seeker.socialPreference];
+    if (socialPoints === undefined) {
+      if (seeker.socialPreference.includes('独')) {
+        socialPoints = 18;
+      } else if (seeker.socialPreference.includes('适度') || seeker.socialPreference.includes('偶尔')) {
+        socialPoints = 23;
+      } else if (seeker.socialPreference.includes('喜') && seeker.socialPreference.includes('社')) {
+        socialPoints = 22;
+      } else {
+        socialPoints = 18;
+      }
+    }
   }
+  score += socialPoints;
   
-  return Math.min(100, Math.max(0, score));
+  return Math.min(100, Math.max(0, Math.round(score)));
 }
 
 function calculateLocationScore(seeker: User, house: House): number {
